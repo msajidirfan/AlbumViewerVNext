@@ -74,31 +74,36 @@ public class ArtistRepository : EntityFrameworkRepository<AlbumViewerContext,Art
     public async Task<bool> DeleteArtist(int id)
     {
         bool result = false;
-
-        var artist = await Context.Artists.FirstOrDefaultAsync(art => art.Id == id);
-
-        // already gone
-        if (artist == null)
-            return true;
-
-        var albumIds = await Context.Albums.Where(alb => alb.ArtistId == id).Select(alb => alb.Id).ToListAsync();
-
-        var albumRepo = new AlbumRepository(Context);
-
-        foreach (var albumId in albumIds)
+        using (var tx = Context.Database.BeginTransaction())
         {
-            // don't run async or we get p
-            result = await albumRepo.DeleteAlbum(albumId, noSaveChanges:true);
+            var artist = await Context.Artists.FirstOrDefaultAsync(art => art.Id == id);
+
+            // already gone
+            if (artist == null)
+                return true;
+
+            var albumIds = await Context.Albums.Where(alb => alb.ArtistId == id).Select(alb => alb.Id).ToListAsync();
+
+            var albumRepo = new AlbumRepository(Context);
+
+            foreach (var albumId in albumIds)
+            {
+                // don't run async or we get p
+                result = await albumRepo.DeleteAlbum(albumId, tx);
+                if (!result)
+                    return false;
+            }
+
+            Context.Artists.Remove(artist);
+
+            result = await SaveAsync(); // just save
             if (!result)
-                return false;
+               return false;
+
+            tx.Commit();
+
+            return result;
         }
-        Context.Artists.Remove(artist);
-        result = await SaveAsync(); // just save
-
-        if (!result)
-           return false;
-
-        return result;
     }
 
     protected override bool OnValidate(Artist entity)
